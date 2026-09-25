@@ -1,0 +1,293 @@
+<?xml version="1.0" ?>
+<sdf version="1.10">
+
+  <world name="sorting_world">
+
+    <!-- Physics -->
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- Gazebo system plugins -->
+    <plugin
+      filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+
+    <plugin
+      filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+
+    <plugin
+      filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+
+    <plugin
+        filename="gz-sim-sensors-system"
+        name="gz::sim::systems::Sensors">
+        <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <!-- Lighting -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+
+      <pose>0 0 10 0 0 0</pose>
+
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Ground -->
+    <model name="ground_plane">
+
+      <static>true</static>
+
+      <link name="ground_link">
+
+        <collision name="ground_collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>10 10</size>
+            </plane>
+          </geometry>
+        </collision>
+
+        <visual name="ground_visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>10 10</size>
+            </plane>
+          </geometry>
+
+          <material>
+            <ambient>0.7 0.7 0.7 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
+          </material>
+        </visual>
+
+      </link>
+    </model>
+
+    <!-- Sorting table -->
+    <model name="sorting_table">
+
+        <!-- Center of the table -->
+        <pose>0 0 0 0 0 0</pose>
+
+        <static>true</static>
+
+        <link name="table_link">
+
+            <!-- Table top -->
+            <collision name="tabletop_collision">
+            <pose>0 0 0.75 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>1.5 1.0 0.05</size>
+                </box>
+            </geometry>
+            </collision>
+
+            <visual name="tabletop_visual">
+            <pose>0 0 0.75 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>1.5 1.0 0.05</size>
+                </box>
+            </geometry>
+
+            <material>
+                <ambient>0.55 0.55 0.55 1</ambient>
+                <diffuse>0.55 0.55 0.55 1</diffuse>
+            </material>
+            </visual>
+
+            <!-- Four legs -->
+
+            <collision name="leg1_collision">
+            <pose>0.65 0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </collision>
+
+            <visual name="leg1_visual">
+            <pose>0.65 0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </visual>
+
+            <collision name="leg2_collision">
+            <pose>0.65 -0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </collision>
+
+            <visual name="leg2_visual">
+            <pose>0.65 -0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </visual>
+
+            <collision name="leg3_collision">
+            <pose>-0.65 0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </collision>
+
+            <visual name="leg3_visual">
+            <pose>-0.65 0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </visual>
+
+            <collision name="leg4_collision">
+            <pose>-0.65 -0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </collision>
+
+            <visual name="leg4_visual">
+            <pose>-0.65 -0.40 0.375 0 0 0</pose>
+            <geometry>
+                <box>
+                <size>0.08 0.08 0.75</size>
+                </box>
+            </geometry>
+            </visual>
+
+        </link>
+    </model>
+
+    <!-- Red sorting bin -->
+    <include>
+        <uri>model://red_bin</uri>
+        <name>red_bin</name>
+        <pose>-0.5 -0.8 0 0 0 0</pose>
+    </include>
+
+    <!-- Blue sorting bin -->
+    <include>
+        <uri>model://blue_bin</uri>
+        <name>blue_bin</name>
+        <pose>0.5 -0.8 0 0 0 0</pose>
+    </include>
+
+    <!-- Sorting objects -->
+
+    <include>
+        <uri>model://red_cube</uri>
+        <name>red_cube_1</name>
+        <pose>-0.45 0.20 0.85 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://blue_cube</uri>
+        <name>blue_cube_1</name>
+        <pose>-0.15 0.20 0.85 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://red_cylinder</uri>
+        <name>red_cylinder_1</name>
+        <pose>0.15 0.20 0.85 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://blue_cylinder</uri>
+        <name>blue_cylinder_1</name>
+        <pose>0.45 0.20 0.85 0 0 0</pose>
+    </include>
+
+    <!-- Fixed overhead RGB camera -->
+    <model name="sorting_camera">
+
+        <static>true</static>
+
+        <!--
+            Camera position:
+            x = 0
+            y = 0
+            z = 2.5 m
+            Pitch = +90 degrees so the camera looks downward.
+        -->
+        <pose>0 0 2.5 0 1.5708 1.5708</pose>
+
+        <link name="camera_link">
+
+            <!-- Small visual body so we can see where the camera is -->
+            <visual name="camera_body">
+            <geometry>
+                <box>
+                <size>0.12 0.08 0.08</size>
+                </box>
+            </geometry>
+
+            <material>
+                <ambient>0.1 0.1 0.1 1</ambient>
+                <diffuse>0.1 0.1 0.1 1</diffuse>
+            </material>
+            </visual>
+
+            <!-- Actual RGB camera sensor -->
+            <sensor name="rgb_camera" type="camera">
+
+                <always_on>true</always_on>
+                <update_rate>30</update_rate>
+
+                <topic>/sorting_camera/image</topic>
+
+                <camera>
+
+                    <horizontal_fov>1.047</horizontal_fov>
+
+                    <image>
+                        <width>640</width>
+                        <height>480</height>
+                        <format>R8G8B8</format>
+                    </image>
+
+                    <clip>
+                        <near>0.1</near>
+                        <far>100</far>
+                    </clip>
+
+                </camera>
+
+            </sensor>
+
+        </link>
+
+    </model>
+
+  </world>
+
+</sdf>
