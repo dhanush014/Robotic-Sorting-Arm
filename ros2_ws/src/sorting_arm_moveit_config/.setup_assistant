@@ -1,0 +1,10 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: sorting_arm
+    relative_path: urdf/sorting_arm.urdf.xacro
+  srdf:
+    relative_path: config/sorting_arm.srdf
+  package_settings:
+    author_name: dhanush
+    author_email: dhanushs9686@gmail.com
+    generated_timestamp: 1790616453
