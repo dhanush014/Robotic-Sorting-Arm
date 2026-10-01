@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!--
+  UR10e + AG95 (sorting_arm) mounted on the pedestal in worlds/sorting_world.sdf.
+  These defaults take precedence over the zero defaults in sorting_arm.urdf.xacro;
+  keep them in sync with the robot_pedestal model in the world.
+-->
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="sorting_arm">
+  <xacro:arg name="mount_x" default="0"/>
+  <xacro:arg name="mount_y" default="-0.75"/>
+  <xacro:arg name="mount_z" default="0.775"/>
+
+  <xacro:include filename="$(find sorting_arm)/urdf/sorting_arm.urdf.xacro"/>
+</robot>

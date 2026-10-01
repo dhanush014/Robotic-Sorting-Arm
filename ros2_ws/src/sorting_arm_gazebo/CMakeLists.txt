@@ -9,6 +9,7 @@ install(
     config
     models
     worlds
+    urdf
   DESTINATION share/${PROJECT_NAME}
 )
 

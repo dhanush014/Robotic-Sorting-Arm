@@ -27,6 +27,11 @@
   <xacro:arg name="simulation_controllers" default="" />
   <xacro:arg name="ros_namespace" default="" />
 
+  <!-- robot base pose in the world; zero by default, overridden by sorting_arm_gazebo's cell -->
+  <xacro:arg name="mount_x" default="0"/>
+  <xacro:arg name="mount_y" default="0"/>
+  <xacro:arg name="mount_z" default="0"/>
+
   <!-- create link fixed to the "world" -->
   <link name="world" />
 
@@ -68,7 +73,7 @@
     safety_k_position="$(arg safety_k_position)"
     force_abs_paths="true"
     >
-    <origin xyz="0 0 0" rpy="0 0 0" />          <!-- position robot in the world -->
+    <origin xyz="$(arg mount_x) $(arg mount_y) $(arg mount_z)" rpy="0 0 0" />          <!-- position robot in the world -->
   </xacro:ur_robot>
 
   <!-- Added end effector/tool0 here: -->
