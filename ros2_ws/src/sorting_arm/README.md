@@ -13,17 +13,18 @@ This repository contains a description for .
 2. Clone the repository into your ROS2 workspace:
    ```bash
    cd /path/to/your_ros2_ws/src
-   git clone "(Dhanush's repo here)"
+   git clone --recurse-submodules https://github.com/dhanush014/Robotic-Sorting-Arm.git
    ```
+   (Already cloned without it? Run `git submodule update --init`.)
 
 3. Install dependencies using rosdep:
    ```bash
    rosdep update && rosdep install -i --from-path . --rosdistro jazzy -y
    ```
 
-4. Build the packages (dh_gripper_driver will fail for now):
+4. Build the packages (dh_gripper_driver is skipped for now):
    ```bash
-   colcon build --symlink-install
+   colcon build --symlink-install --packages-skip dh_gripper_driver --allow-overriding ur_description
    ```
 
 5. Source the setup files:
@@ -35,6 +36,11 @@ This repository contains a description for .
 
 
 ## Usage
+Launch the full sorting cell (UR10e + AG95 on a pedestal, table, bins, objects and overhead RGB camera on `/sorting_camera/image`):
+```bash
+ros2 launch sorting_arm_gazebo sorting_sim.launch.py
+```
+
 Launch the UR10e arm in gazebo and rviz with ag-95 gripper attached, and also launch corresponding controllers:
 ```bash
 ros2 launch sorting_arm sorting_arm_launch.py
