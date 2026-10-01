@@ -3,8 +3,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, IncludeLaunchDescription
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
 
@@ -33,6 +34,7 @@ def generate_launch_description():
             'world_file': os.path.join(
                 pkg_sorting_arm_gazebo, 'worlds', 'sorting_world.sdf'
             ),
+            'launch_rviz': LaunchConfiguration('launch_rviz'),
         }.items()
     )
 
@@ -48,6 +50,10 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'launch_rviz', default_value='true',
+            description="Start ur_simulation_gz's RViz (set false when using MoveIt's RViz)."
+        ),
         set_gz_resource_path,
         robot_sim,
         camera_bridge

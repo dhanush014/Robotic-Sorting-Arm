@@ -27,6 +27,11 @@ def generate_launch_description():
             "world_file",
             default_value=PathJoinSubstitution([pkg, "worlds", "environment.sdf"]),
         ),
+        DeclareLaunchArgument(
+            "launch_rviz",
+            default_value="true",
+            description="Start ur_simulation_gz's RViz (set false when using MoveIt's RViz).",
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(ur_sim),
             launch_arguments={
@@ -34,6 +39,7 @@ def generate_launch_description():
                 "description_file": LaunchConfiguration("description_file"),
                 "world_file": LaunchConfiguration("world_file"),
                 "controllers_file": PathJoinSubstitution([pkg, "config", "ur_controllers.yaml"]),
+                "launch_rviz": LaunchConfiguration("launch_rviz"),
             }.items(),
         ),
         gripper_spawner,

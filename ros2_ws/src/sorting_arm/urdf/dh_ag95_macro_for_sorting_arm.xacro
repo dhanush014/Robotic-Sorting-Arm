@@ -32,7 +32,7 @@
         <visual>
           <origin xyz="-0.036673 0.00875 -0.098336" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/visual/outer_knuckle.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/visual/outer_knuckle.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
           <material name="">
@@ -42,7 +42,7 @@
         <collision>
           <origin xyz="-0.036673 0.00875 -0.098336" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/collision/outer_knuckle.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/collision/outer_knuckle.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
         </collision>
@@ -64,7 +64,7 @@
         <visual>
           <origin xyz="-0.016 0.0254 -0.10586" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/visual/inner_knuckle.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/visual/inner_knuckle.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
           <material name="">
@@ -74,7 +74,7 @@
         <collision>
           <origin xyz="-0.016 0.0254 -0.10586" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/collision/inner_knuckle.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/collision/inner_knuckle.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
         </collision>
@@ -96,7 +96,7 @@
         <visual>
           <origin xyz="-0.091673 0.00875 -0.098336" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/visual/finger.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/visual/finger.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
           <material name="">
@@ -106,7 +106,7 @@
         <collision>
           <origin xyz="-0.091673 0.00875 -0.098336" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/collision/finger.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/collision/finger.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
         </collision>
@@ -130,7 +130,7 @@
         <visual>
           <origin xyz="-0.0705 -0.0 -0.12056" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/visual/finger_pad.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/visual/finger_pad.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
           <material name="">
@@ -140,7 +140,7 @@
         <collision>
           <origin xyz="-0.0705 -0.0 -0.12056" rpy="0 0 0" />
           <geometry>
-            <mesh filename="$(find dh_ag95_description)/meshes/collision/finger_pad.stl"
+            <mesh filename="file://$(find dh_ag95_description)/meshes/collision/finger_pad.stl"
               scale="0.001 0.001 0.001" />
           </geometry>
         </collision>
@@ -229,7 +229,7 @@
       <visual>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
-          <mesh filename="$(find dh_ag95_description)/meshes/visual/base_link.stl"
+          <mesh filename="file://$(find dh_ag95_description)/meshes/visual/base_link.stl"
             scale="0.001 0.001 0.001" />
         </geometry>
         <material name="">
@@ -239,7 +239,7 @@
       <collision>
         <origin xyz="0 0 0" rpy="0 0 0" />
         <geometry>
-          <mesh filename="$(find dh_ag95_description)/meshes/collision/base_link.stl"
+          <mesh filename="file://$(find dh_ag95_description)/meshes/collision/base_link.stl"
             scale="0.001 0.001 0.001" />
         </geometry>
       </collision>
@@ -260,7 +260,7 @@
       <visual>
         <origin xyz="0.0405 0.0143 -0.0147" rpy="0 0 0" />
         <geometry>
-          <mesh filename="$(find dh_ag95_description)/meshes/visual/gripper_body.stl"
+          <mesh filename="file://$(find dh_ag95_description)/meshes/visual/gripper_body.stl"
             scale="0.001 0.001 0.001" />
         </geometry>
         <material name="">
@@ -270,7 +270,7 @@
       <collision>
         <origin xyz="0.0405 0.0143 -0.0147" rpy="0 0 0" />
         <geometry>
-          <mesh filename="$(find dh_ag95_description)/meshes/collision/gripper_body.stl"
+          <mesh filename="file://$(find dh_ag95_description)/meshes/collision/gripper_body.stl"
             scale="0.001 0.001 0.001" />
         </geometry>
       </collision>
