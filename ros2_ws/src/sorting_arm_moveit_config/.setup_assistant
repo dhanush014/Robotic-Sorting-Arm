@@ -1,0 +1,11 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: sorting_arm_gazebo
+    relative_path: urdf/sorting_cell.urdf.xacro
+    xacro_args: name:=ur ur_type:=ur10e safety_limits:=true safety_pos_margin:=0.15 safety_k_position:=20
+  srdf:
+    relative_path: config/sorting_arm.srdf
+  package_settings:
+    author_name: dhanush
+    author_email: dhanushs9686@gmail.com
+    generated_timestamp: 1790616453
