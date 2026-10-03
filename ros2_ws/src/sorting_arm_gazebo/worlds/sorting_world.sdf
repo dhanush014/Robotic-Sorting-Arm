@@ -265,6 +265,18 @@
         <pose>0.45 0.20 0.85 0 0 0</pose>
     </include>
 
+    <!-- Obstacles -->
+    <include>
+        <uri>model://obstacle_bottle</uri>
+        <name>obstacle_bottle_1</name>
+        <pose>-0.45 -0.20 0.775 0 0 0</pose>
+    </include>
+
+    <include>
+        <uri>model://obstacle_ball</uri>
+        <name>obstacle_ball_1</name>
+        <pose>-0.15 -0.20 0.775 0 0 0</pose>
+    </include>
 
     <!-- Fixed overhead RGB camera -->
     <model name="sorting_camera">

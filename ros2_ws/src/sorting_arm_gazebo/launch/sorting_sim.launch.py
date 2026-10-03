@@ -3,9 +3,16 @@ import os
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    AppendEnvironmentVariable,
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    IncludeLaunchDescription,
+    RegisterEventHandler,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch.event_handlers import OnProcessExit
 
 from launch_ros.actions import Node
 
@@ -22,6 +29,24 @@ def generate_launch_description():
         value=os.path.join(pkg_sorting_arm_gazebo, 'models')
     )
 
+    randomize_world = ExecuteProcess(
+        cmd=[
+            'python3',
+            os.path.join(
+                pkg_sorting_arm_gazebo,
+                'scripts',
+                'randomize_objects.py'
+            ),
+            os.path.join(
+                pkg_sorting_arm_gazebo,
+                'worlds',
+                'sorting_world.sdf'
+            ),
+            '/tmp/sorting_world_randomized.sdf',
+        ],
+        output='screen',
+    )
+
     # Robot, controllers and Gazebo, via the existing sorting_arm launch
     robot_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -31,11 +56,16 @@ def generate_launch_description():
             'description_file': os.path.join(
                 pkg_sorting_arm_gazebo, 'urdf', 'sorting_cell.urdf.xacro'
             ),
-            'world_file': os.path.join(
-                pkg_sorting_arm_gazebo, 'worlds', 'sorting_world.sdf'
-            ),
+            'world_file': '/tmp/sorting_world_randomized.sdf',
             'launch_rviz': LaunchConfiguration('launch_rviz'),
         }.items()
+    )
+
+    start_sim_after_randomization = RegisterEventHandler(
+        OnProcessExit(
+            target_action=randomize_world,
+            on_exit=[robot_sim],
+        )
     )
 
     # Bridge camera images from Gazebo to ROS 2
@@ -55,6 +85,7 @@ def generate_launch_description():
             description="Start ur_simulation_gz's RViz (set false when using MoveIt's RViz)."
         ),
         set_gz_resource_path,
-        robot_sim,
+        randomize_world,
+        start_sim_after_randomization,
         camera_bridge
     ])

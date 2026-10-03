@@ -8,9 +8,17 @@ install(
     launch
     config
     models
+    scripts
     worlds
     urdf
   DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+  PROGRAMS
+    scripts/randomize_objects.py
+    scripts/object_detector.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()
