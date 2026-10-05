@@ -146,24 +146,18 @@
         </collision>
       </link>
 
-      <!-- Gazebo friction/contact -->
+      <!-- Gazebo friction/contact for the pad. sdformat's URDF parser maps these
+           tags onto the link's collision <surface>; a raw <surface> block here
+           would be ignored. finger_pad_joint sets preserveFixedJoint so the pad
+           is not lumped into the finger link, which would drop these settings. -->
       <gazebo reference="${prefix}${fingerprefix}_finger_pad">
-        <surface>
-          <friction>
-            <ode>
-              <mu>150.0</mu>
-              <mu2>150.0</mu2>
-            </ode>
-          </friction>
-          <contact>
-            <ode>
-              <kp>1000000.0</kp>
-              <kd>1.0</kd>
-              <min_depth>0.001</min_depth>
-            </ode>
-          </contact>
-        </surface>
+        <mu1>150.0</mu1>
+        <mu2>150.0</mu2>
+        <kp>1000000.0</kp>
+        <kd>1.0</kd>
+        <minDepth>0.001</minDepth>
       </gazebo>
+    </xacro:macro>
 
     <xacro:macro name="finger_links" params="prefix fingerprefix">
       <xacro:outer_knuckle prefix="${prefix}" fingerprefix="${fingerprefix}" />
@@ -222,6 +216,9 @@
         <parent link="${prefix}${fingerprefix}_finger" />
         <child link="${prefix}${fingerprefix}_finger_pad" />
       </joint>
+      <gazebo reference="${prefix}${fingerprefix}_inner_finger_pad_joint">
+        <preserveFixedJoint>true</preserveFixedJoint>
+      </gazebo>
     </xacro:macro>
 
     <xacro:macro name="finger_joints" params="prefix fingerprefix reflect">
