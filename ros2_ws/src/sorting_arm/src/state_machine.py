@@ -78,7 +78,7 @@ class ObjectTask:
 
 
 
-COLOR_DROP_POINTS = {"red": make_pose(0.45, -0.20, 0.04),"blue": make_pose(0.15, -0.20, 0.04),}
+COLOR_DROP_POINTS = {"red": make_pose(0.45, -0.20, 0.4),"blue": make_pose(0.15, -0.20, 0.4),}
 OBJ1_POSE = make_pose(-0.45, 0.20, 0.85)
 OBJ2_POSE = make_pose(-0.15, 0.20, 0.85)
 OBJ3_POSE = make_pose(0.15, 0.20, 0.85)
