@@ -42,7 +42,6 @@ bool move_cartesian_z(
   double fraction = move_group.computeCartesianPath(
     waypoints,
     0.005,
-    0.0,
     trajectory,
     true
   );
