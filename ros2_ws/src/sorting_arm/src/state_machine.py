@@ -60,11 +60,35 @@ def quaternion_from_euler(roll: float, pitch: float, yaw: float) -> Tuple[float,
     )
 
 
+def quaternion_multiply(
+    a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]
+) -> Tuple[float, float, float, float]:
+    """Hamilton product a * b of (x, y, z, w) quaternions."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+# The MoveIt arm group tip is grasp_link, which is fixed to ag95_base_link with
+# rpy=(pi/2, -pi/2, 0) (grasp_joint in dh_ag95_macro_for_sorting_arm.xacro).
+GRASP_LINK_OFFSET_Q = quaternion_from_euler(math.pi / 2, -math.pi / 2, 0.0)
+
+
 def make_pose(x: float, y: float, z: float, roll: float = 0.0, pitch: float = math.pi, yaw: float = 0.0) -> Pose:
-    """Default orientation (roll=0, pitch=pi) points straight down, rotate z to change gripper angle."""
+    """Pose target for grasp_link.
+
+    roll/pitch/yaw give the orientation of the gripper base (ag95_base_link, whose +z is the
+    finger direction), so the default (roll=0, pitch=pi) points the fingers straight down;
+    rotate yaw to change the gripper angle. The fixed grasp_link offset is applied on top.
+    """
     p = Pose()
     p.position.x, p.position.y, p.position.z = x, y, z
-    qx, qy, qz, qw = quaternion_from_euler(roll, pitch, yaw)
+    qx, qy, qz, qw = quaternion_multiply(quaternion_from_euler(roll, pitch, yaw), GRASP_LINK_OFFSET_Q)
     p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w = qx, qy, qz, qw
     return p
 
