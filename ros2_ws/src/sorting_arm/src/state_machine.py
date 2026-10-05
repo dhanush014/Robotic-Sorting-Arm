@@ -7,12 +7,13 @@ client attached to this node so everything shares one rclpy context and one exec
 """
 
 import math
-import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
+from rclpy.time import Time
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.qos import QoSProfile, DurabilityPolicy
@@ -45,9 +46,11 @@ GRIPPER_MIN_TRAVEL = 0.05           # rad the joint must move before a stall cou
 # not geared together and the distal finger joints keep rotating after the knuckles touch the
 # object, tilting the pads until the object squeezes out. The close is therefore ramped per side:
 # all joints of a side move together (pads stay parallel), a side freezes where its outer knuckle
-# meets the object, and once both sides touch they squeeze by GRIPPER_SQUEEZE. The ramp runs on
-# wall-clock time but the joints move in sim time, so a side only advances while it keeps up, and
-# contact means lagging *and* stationary for GRIPPER_STALL_WINDOW (a slow sim only means lagging).
+# meets the object, and once both sides touch they squeeze by GRIPPER_SQUEEZE. A side only
+# advances while it keeps up with its command, and contact means lagging *and* stationary for
+# GRIPPER_STALL_WINDOW.
+# All waits and timeouts in this node run on the node clock, i.e. sim time under use_sim_time, so
+# they mean the same thing however fast Gazebo runs (the GUI can drop the real-time factor to ~13%).
 GRIPPER_JOINTS = [
     "left_outer_knuckle_joint", "right_outer_knuckle_joint",
     "left_inner_knuckle_joint", "right_inner_knuckle_joint",
@@ -197,6 +200,28 @@ class PickPlaceNode(Node):
         self.get_logger().info(f"[state] {state}")
         self.state_pub.publish(String(data=state))
  
+    def _now(self) -> float:
+        """Node clock time in seconds (sim time under use_sim_time)."""
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _sleep(self, seconds: float):
+        self.get_clock().sleep_for(Duration(seconds=seconds))
+
+    def _wait_until(self, condition: Callable[[], bool], timeout: float, period: float = 0.05) -> bool:
+        """Poll condition on the node clock until it holds or timeout seconds pass."""
+        deadline = self._now() + timeout
+        while not condition():
+            if self._now() >= deadline:
+                return False
+            self._sleep(period)
+        return True
+
+    def _wait_for_clock(self):
+        """Under use_sim_time the clock reads 0 until the first /clock message; wait for it."""
+        clock = self.get_clock()
+        while rclpy.ok() and clock.now().nanoseconds == 0:
+            clock.sleep_until(Time(nanoseconds=1, clock_type=clock.clock_type))
+
     def _joint_state_cb(self, msg: JointState):
         self.last_joint_state = msg
  
@@ -208,10 +233,7 @@ class PickPlaceNode(Node):
             self.get_logger().error(f"Could not parse {DETECTIONS_TOPIC}: {e}")
  
     def _wait_for_detections(self, timeout: float = DETECTIONS_WAIT_TIMEOUT) -> bool:
-        start = time.time()
-        while self.detected_objects is None and time.time() - start < timeout:
-            time.sleep(0.05)
-        return self.detected_objects is not None
+        return self._wait_until(lambda: self.detected_objects is not None, timeout)
 
     # for gripper control:
     def _command_gripper(self, position: float, accept_stall: bool = False) -> bool:
@@ -235,27 +257,24 @@ class PickPlaceNode(Node):
     def _close_gripper(self, target: float) -> bool:
         """Ramp both sides closed, freezing each side at contact, then squeeze (see GRIPPER_JOINTS)."""
         outer = ["left_outer_knuckle_joint", "right_outer_knuckle_joint"]
-        start = time.time()
-        actual = None
-        while actual is None and time.time() - start < GRIPPER_WAIT_TIMEOUT:
-            actual = self._joint_positions(outer)
-            time.sleep(0.01)
-        if actual is None:
+        start = self._now()
+        if not self._wait_until(lambda: self._joint_positions(outer) is not None, GRIPPER_WAIT_TIMEOUT, 0.01):
             self.get_logger().error("No gripper joint states")
             return False
+        actual = self._joint_positions(outer)
 
         command = list(actual)
         in_contact = [False, False]
         history: List[Tuple[float, List[float]]] = []  # (time, outer positions)
-        while time.time() - start < GRIPPER_WAIT_TIMEOUT:
+        while self._now() - start < GRIPPER_WAIT_TIMEOUT:
             for side in (0, 1):
                 if not in_contact[side] and command[side] - actual[side] < GRIPPER_CONTACT_LAG:
                     command[side] = min(target, command[side] + GRIPPER_RAMP_STEP)
             self._publish_gripper(*command)
-            time.sleep(GRIPPER_RAMP_PERIOD)
+            self._sleep(GRIPPER_RAMP_PERIOD)
 
             actual = self._joint_positions(outer) or actual
-            now = time.time()
+            now = self._now()
             history.append((now, list(actual)))
             history = [(t, a) for t, a in history if now - t <= GRIPPER_STALL_WINDOW]
             window_full = now - start >= GRIPPER_STALL_WINDOW and len(history) > 1
@@ -269,7 +288,7 @@ class PickPlaceNode(Node):
             if all(in_contact):
                 squeeze = [a + GRIPPER_SQUEEZE for a in actual]
                 self._publish_gripper(*squeeze)
-                time.sleep(GRIPPER_SETTLE)
+                self._sleep(GRIPPER_SETTLE)
                 self.get_logger().info(
                     f"Gripper contact at left={actual[0]:.3f} right={actual[1]:.3f} rad; treating as grasped"
                 )
@@ -288,15 +307,15 @@ class PickPlaceNode(Node):
 
     def _wait_for_gripper(self, target: float, start_position: Optional[float], accept_stall: bool) -> bool:
         """Wait until the gripper reaches target or, if accept_stall, stops moving after travelling."""
-        start = time.time()
+        start = self._now()
         samples: List[Tuple[float, float]] = []  # (time, position)
-        while time.time() - start < GRIPPER_WAIT_TIMEOUT:
+        while self._now() - start < GRIPPER_WAIT_TIMEOUT:
             pos = self._gripper_position()
             if pos is not None:
                 if abs(pos - target) < GRIPPER_TOLERANCE:
                     return True
 
-                now = time.time()
+                now = self._now()
                 if start_position is None:
                     start_position = pos
                 samples.append((now, pos))
@@ -310,7 +329,7 @@ class PickPlaceNode(Node):
                         f"Gripper stopped at {pos:.3f} rad (commanded {target:.3f}); treating as grasped"
                     )
                     return True
-            time.sleep(0.05)
+            self._sleep(0.05)
         self.get_logger().warn("Timed out waiting for gripper to reach target")
         return False
 
@@ -367,13 +386,13 @@ class PickPlaceNode(Node):
         return self._apply_scene(world)
 
     def _apply_scene(self, scene: PlanningScene) -> bool:
-        if not self.scene_client.wait_for_service(timeout_sec=5.0):
+        if not self._wait_until(self.scene_client.service_is_ready, 5.0):
             self.get_logger().error("/apply_planning_scene not available")
             return False
         done = threading.Event()
         future = self.scene_client.call_async(ApplyPlanningScene.Request(scene=scene))
         future.add_done_callback(lambda _: done.set())
-        if not done.wait(10.0) or future.result() is None or not future.result().success:
+        if not self._wait_until(done.is_set, 10.0) or future.result() is None or not future.result().success:
             self.get_logger().error("Failed to update the planning scene")
             return False
         return True
@@ -406,6 +425,7 @@ class PickPlaceNode(Node):
 
     def run(self):
         self._set_state("INIT")
+        self._wait_for_clock()
         if not self._wait_for_detections():
             self.get_logger().error(f"No message on {DETECTIONS_TOPIC} within timeout, aborting")
             self._set_state("ERROR:WAIT_FOR_DETECTIONS")
