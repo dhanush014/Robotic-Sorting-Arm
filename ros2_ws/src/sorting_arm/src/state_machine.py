@@ -20,7 +20,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import String, Float64MultiArray
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, Pose
-from moveit_msgs.msg import CollisionObject, PlanningScene
+from moveit_msgs.msg import AttachedCollisionObject, CollisionObject, PlanningScene
 from moveit_msgs.srv import ApplyPlanningScene
 from shape_msgs.msg import SolidPrimitive
 
@@ -67,6 +67,16 @@ APPROACH_STANDOFF = 0.10
 TABLE_TOP_Z = 0.775
 OBJECT_KEEPOUT_RADIUS = 0.05
 OBJECT_KEEPOUT_HEIGHT = 0.11
+# Once grasped, the object is attached to grasp_link so planning accounts for it hanging below the
+# fingertips (otherwise carried objects drag across the table edge). Same footprint, starting just
+# above the table so the attached shape is not in collision with it at attach time.
+ATTACHED_OBJECT_HEIGHT = 0.10
+ATTACH_LINK = "grasp_link"
+GRIPPER_TOUCH_LINKS = [
+    "grasp_link", "ag95_base_link", "ag95_body",
+    "left_outer_knuckle", "left_inner_knuckle", "left_finger", "left_finger_pad",
+    "right_outer_knuckle", "right_inner_knuckle", "right_finger", "right_finger_pad",
+]
 
 DETECTIONS_TOPIC = "/detected_objects"
 DETECTIONS_WAIT_TIMEOUT = 15.0 
@@ -305,28 +315,58 @@ class PickPlaceNode(Node):
         return False
 
 
+    @staticmethod
+    def _object_shape(task: "ObjectTask", height: float, bottom_z: float) -> CollisionObject:
+        """Cylinder covering the object at its pick position, in the world frame."""
+        obj = CollisionObject()
+        obj.header.frame_id = "world"
+        obj.id = f"pick_target_{task.object_id}"
+        primitive = SolidPrimitive(type=SolidPrimitive.CYLINDER)
+        primitive.dimensions = [height, OBJECT_KEEPOUT_RADIUS]
+        pose = Pose()
+        pose.position.x = task.pick_pose.position.x
+        pose.position.y = task.pick_pose.position.y
+        pose.position.z = bottom_z + height / 2
+        pose.orientation.w = 1.0
+        obj.primitives.append(primitive)
+        obj.primitive_poses.append(pose)
+        return obj
+
     def _apply_object_keepouts(self, tasks: List["ObjectTask"], add: bool) -> bool:
         """Add or remove the planning-scene keep-out cylinders for these objects."""
         scene = PlanningScene(is_diff=True)
         for task in tasks:
-            obj = CollisionObject()
-            obj.header.frame_id = "world"
-            obj.id = f"pick_target_{task.object_id}"
+            obj = self._object_shape(task, OBJECT_KEEPOUT_HEIGHT, TABLE_TOP_Z)
             if add:
-                primitive = SolidPrimitive(type=SolidPrimitive.CYLINDER)
-                primitive.dimensions = [OBJECT_KEEPOUT_HEIGHT, OBJECT_KEEPOUT_RADIUS]
-                pose = Pose()
-                pose.position.x = task.pick_pose.position.x
-                pose.position.y = task.pick_pose.position.y
-                pose.position.z = TABLE_TOP_Z + OBJECT_KEEPOUT_HEIGHT / 2
-                pose.orientation.w = 1.0
-                obj.primitives.append(primitive)
-                obj.primitive_poses.append(pose)
                 obj.operation = CollisionObject.ADD
             else:
-                obj.operation = CollisionObject.REMOVE
+                obj = CollisionObject(header=obj.header, id=obj.id, operation=CollisionObject.REMOVE)
             scene.world.collision_objects.append(obj)
+        return self._apply_scene(scene)
 
+    def _attach_object(self, task: "ObjectTask", attach: bool) -> bool:
+        """Attach the grasped object to grasp_link, or detach and remove it after release."""
+        scene = PlanningScene(is_diff=True)
+        scene.robot_state.is_diff = True
+        aco = AttachedCollisionObject(link_name=ATTACH_LINK)
+        if attach:
+            aco.object = self._object_shape(task, ATTACHED_OBJECT_HEIGHT, TABLE_TOP_Z + 0.005)
+            aco.object.operation = CollisionObject.ADD
+            aco.touch_links = GRIPPER_TOUCH_LINKS
+        else:
+            aco.object = CollisionObject(id=f"pick_target_{task.object_id}", operation=CollisionObject.REMOVE)
+        scene.robot_state.attached_collision_objects.append(aco)
+        if not self._apply_scene(scene):
+            return False
+        if attach:
+            return True
+        # Detaching puts the object back into the world; it is in the bin now, so drop it.
+        world = PlanningScene(is_diff=True)
+        world.world.collision_objects.append(
+            CollisionObject(id=aco.object.id, operation=CollisionObject.REMOVE))
+        return self._apply_scene(world)
+
+    def _apply_scene(self, scene: PlanningScene) -> bool:
         if not self.scene_client.wait_for_service(timeout_sec=5.0):
             self.get_logger().error("/apply_planning_scene not available")
             return False
@@ -334,7 +374,7 @@ class PickPlaceNode(Node):
         future = self.scene_client.call_async(ApplyPlanningScene.Request(scene=scene))
         future.add_done_callback(lambda _: done.set())
         if not done.wait(10.0) or future.result() is None or not future.result().success:
-            self.get_logger().error("Failed to update object keep-outs in the planning scene")
+            self.get_logger().error("Failed to update the planning scene")
             return False
         return True
 
@@ -346,11 +386,13 @@ class PickPlaceNode(Node):
         steps = [
             (f"PICK_APPROACH:{task.object_id}", lambda: self.move_to_pose_fn(approach_pick)),
             (f"PICK_DESCEND:{task.object_id}", lambda: self.move_to_pose_fn(task.pick_pose)),
-            (f"GRIPPER_CLOSE:{task.object_id}", lambda: self._command_gripper(task.gripper_close, accept_stall=True)),
+            (f"GRIPPER_CLOSE:{task.object_id}", lambda: self._command_gripper(task.gripper_close, accept_stall=True)
+             and self._attach_object(task, attach=True)),
             (f"PICK_RETREAT:{task.object_id}", lambda: self.move_to_pose_fn(approach_pick)),
             (f"PLACE_APPROACH:{task.object_id}", lambda: self.move_to_pose_fn(approach_place)),
             (f"PLACE_DESCEND:{task.object_id}", lambda: self.move_to_pose_fn(task.place_pose)),
-            (f"GRIPPER_OPEN:{task.object_id}", lambda: self._command_gripper(GRIPPER_OPEN)),
+            (f"GRIPPER_OPEN:{task.object_id}", lambda: self._command_gripper(GRIPPER_OPEN)
+             and self._attach_object(task, attach=False)),
             (f"PLACE_RETREAT:{task.object_id}", lambda: self.move_to_pose_fn(approach_place)),
         ]
 
