@@ -32,6 +32,11 @@ GRIPPER_OPEN = 0.0
 GRIPPER_CLOSE = 0.75 #0.93 = fully closed, will probably change based on testing
 GRIPPER_WAIT_TIMEOUT = 5.0
 GRIPPER_TOLERANCE = 0.03            # rad
+# Closing on an object stops the fingers short of the commanded position, so a close also
+# succeeds once the finger joint has moved and then stalled.
+GRIPPER_STALL_WINDOW = 0.3          # s the joint must stay still to count as stalled
+GRIPPER_STALL_EPS = 0.002           # rad of motion allowed within the stall window
+GRIPPER_MIN_TRAVEL = 0.05           # rad the joint must move before a stall counts
 
 APPROACH_STANDOFF = 0.10
 
@@ -140,22 +145,45 @@ class PickPlaceNode(Node):
         return self.detected_objects is not None
 
     # for gripper control:
-    def _command_gripper(self, position: float) -> bool:
+    def _command_gripper(self, position: float, accept_stall: bool = False) -> bool:
         msg = Float64MultiArray()
         msg.data = [position, position, position, position, position, position]
+        start_position = self._gripper_position()
         self.gripper_pub.publish(msg)
-        return self._wait_for_gripper(position)
+        return self._wait_for_gripper(position, start_position, accept_stall)
 
-    def _wait_for_gripper(self, target: float) -> bool:
+    def _gripper_position(self) -> Optional[float]:
+        js = self.last_joint_state
+        if js is not None and GRIPPER_JOINT_NAME in js.name:
+            return js.position[js.name.index(GRIPPER_JOINT_NAME)]
+        return None
+
+    def _wait_for_gripper(self, target: float, start_position: Optional[float], accept_stall: bool) -> bool:
+        """Wait until the gripper reaches target or, if accept_stall, stops moving after travelling."""
         start = time.time()
+        samples: List[Tuple[float, float]] = []  # (time, position)
         while time.time() - start < GRIPPER_WAIT_TIMEOUT:
-            js = self.last_joint_state
-            if js is not None and GRIPPER_JOINT_NAME in js.name:
-                idx = js.name.index(GRIPPER_JOINT_NAME)
-                if abs(js.position[idx] - target) < GRIPPER_TOLERANCE:
+            pos = self._gripper_position()
+            if pos is not None:
+                if abs(pos - target) < GRIPPER_TOLERANCE:
+                    return True
+
+                now = time.time()
+                if start_position is None:
+                    start_position = pos
+                samples.append((now, pos))
+                samples = [(t, p) for t, p in samples if now - t <= GRIPPER_STALL_WINDOW]
+
+                travelled = abs(pos - start_position) >= GRIPPER_MIN_TRAVEL
+                window_full = now - start >= GRIPPER_STALL_WINDOW and len(samples) > 1
+                still = max(p for _, p in samples) - min(p for _, p in samples) < GRIPPER_STALL_EPS
+                if accept_stall and travelled and window_full and still:
+                    self.get_logger().info(
+                        f"Gripper stopped at {pos:.3f} rad (commanded {target:.3f}); treating as grasped"
+                    )
                     return True
             time.sleep(0.05)
-        self.get_logger().warn("Timed out waiting for gripper to reach target; continuing anyway")
+        self.get_logger().warn("Timed out waiting for gripper to reach target")
         return False
 
 
@@ -167,7 +195,7 @@ class PickPlaceNode(Node):
         steps = [
             (f"PICK_APPROACH:{task.object_id}", lambda: self.move_to_pose_fn(approach_pick)),
             (f"PICK_DESCEND:{task.object_id}", lambda: self.move_to_pose_fn(task.pick_pose)),
-            (f"GRIPPER_CLOSE:{task.object_id}", lambda: self._command_gripper(task.gripper_close)),
+            (f"GRIPPER_CLOSE:{task.object_id}", lambda: self._command_gripper(task.gripper_close, accept_stall=True)),
             (f"PICK_RETREAT:{task.object_id}", lambda: self.move_to_pose_fn(approach_pick)),
             (f"PLACE_APPROACH:{task.object_id}", lambda: self.move_to_pose_fn(approach_place)),
             (f"PLACE_DESCEND:{task.object_id}", lambda: self.move_to_pose_fn(task.place_pose)),
