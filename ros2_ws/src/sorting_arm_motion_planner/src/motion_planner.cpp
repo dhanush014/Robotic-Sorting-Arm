@@ -78,8 +78,20 @@ bool move_to_pose(
 
   RCLCPP_INFO(logger, "Planning to target pose...");
 
+  // RRTConnect is randomized and its interpolated path occasionally clips the table on long
+  // moves (rejected by ValidateSolution), so retry a few times before giving up.
+  constexpr int kMaxPlanningAttempts = 5;
   moveit::planning_interface::MoveGroupInterface::Plan plan;
-  moveit::core::MoveItErrorCode plan_result = move_group.plan(plan);
+  moveit::core::MoveItErrorCode plan_result;
+  for (int attempt = 1; attempt <= kMaxPlanningAttempts; ++attempt) {
+    plan_result = move_group.plan(plan);
+    if (plan_result == moveit::core::MoveItErrorCode::SUCCESS) {
+      break;
+    }
+    RCLCPP_WARN(
+      logger, "Planning attempt %d/%d failed (error code: %d)",
+      attempt, kMaxPlanningAttempts, plan_result.val);
+  }
   if (plan_result != moveit::core::MoveItErrorCode::SUCCESS) {
     RCLCPP_ERROR(logger, "Could not plan path to target pose (error code: %d)", plan_result.val);
     return false;
@@ -120,6 +132,7 @@ int main(int argc, char *argv[])
   // Overrides default_*_scaling_factor from joint_limits.yaml for every request.
   move_group.setMaxVelocityScalingFactor(0.5);
   move_group.setMaxAccelerationScalingFactor(0.5);
+  move_group.setPlanningTime(5.0);
 
   RCLCPP_INFO(
     node->get_logger(),
