@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import os
 
 import rclpy
 from rclpy.node import Node
@@ -21,6 +22,12 @@ class ObjectDetector(Node):
         super().__init__('object_detector')
 
         self.bridge = CvBridge()
+
+        # Debug window with the detection regions; disable for headless runs.
+        self.show_image = self.declare_parameter('show_image', True).value
+        if self.show_image and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+            self.get_logger().warn('No display available, disabling show_image')
+            self.show_image = False
 
         # Camera subscriber
         self.subscription = self.create_subscription(
@@ -169,8 +176,9 @@ class ObjectDetector(Node):
                     f'Published detected objects: {json_message}'
                 )
 
-            cv2.imshow('Sorting Camera', image)
-            cv2.waitKey(1)
+            if self.show_image:
+                cv2.imshow('Sorting Camera', image)
+                cv2.waitKey(1)
 
         except Exception as e:
             self.get_logger().error(
@@ -193,7 +201,8 @@ def main(args=None):
         if rclpy.ok():
             rclpy.shutdown()
 
-        cv2.destroyAllWindows()
+        if node.show_image:
+            cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
