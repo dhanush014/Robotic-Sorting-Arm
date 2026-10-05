@@ -5,13 +5,13 @@
 
     <link name="cylinder_link">
 
-      <!-- Physical properties -->
+      <!-- Physical properties. 0.07 m diameter to fit the AG-95's 95 mm max opening. -->
       <inertial>
         <mass>0.1</mass>
         <inertia>
-          <ixx>0.000083</ixx>
-          <iyy>0.000083</iyy>
-          <izz>0.000125</izz>
+          <ixx>0.000114</ixx>
+          <iyy>0.000114</iyy>
+          <izz>0.0000613</izz>
         </inertia>
       </inertial>
 
@@ -19,7 +19,7 @@
       <collision name="cylinder_collision">
         <geometry>
           <cylinder>
-            <radius>0.05</radius>
+            <radius>0.035</radius>
             <length>0.1</length>
           </cylinder>
         </geometry>
@@ -29,7 +29,7 @@
       <visual name="cylinder_visual">
         <geometry>
           <cylinder>
-            <radius>0.05</radius>
+            <radius>0.035</radius>
             <length>0.1</length>
           </cylinder>
         </geometry>

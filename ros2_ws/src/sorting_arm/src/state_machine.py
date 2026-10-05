@@ -119,10 +119,14 @@ COLOR_DROP_POINTS = {
     "red": make_pose(-0.5, -0.8, RELEASE_HEIGHT),
     "blue": make_pose(0.5, -0.8, RELEASE_HEIGHT),
 }
-OBJ1_POSE = make_pose(-0.45, 0.20, 0.85)
-OBJ2_POSE = make_pose(-0.15, 0.20, 0.85)
-OBJ3_POSE = make_pose(0.15, 0.20, 0.85)
-OBJ4_POSE = make_pose(0.45, 0.20, 0.85)
+# grasp_link height for picking. The table top is at 0.775 and objects are 0.07 m wide (cubes
+# 0.07 m tall, centre 0.81; cylinders 0.1 m tall, centre 0.825). The AG-95 pads span ~0.01-0.04 m
+# above grasp_link, so 0.815 grips both shapes with the fingertips ~3 cm clear of the table.
+PICK_HEIGHT = 0.815
+OBJ1_POSE = make_pose(-0.45, 0.20, PICK_HEIGHT)
+OBJ2_POSE = make_pose(-0.15, 0.20, PICK_HEIGHT)
+OBJ3_POSE = make_pose(0.15, 0.20, PICK_HEIGHT)
+OBJ4_POSE = make_pose(0.45, 0.20, PICK_HEIGHT)
 
 
 class PickPlaceNode(Node):

@@ -5,13 +5,13 @@
 
     <link name="cube_link">
 
-      <!-- Physical properties -->
+      <!-- Physical properties. 0.07 m wide to fit the AG-95's 95 mm max opening. -->
       <inertial>
         <mass>0.1</mass>
         <inertia>
-          <ixx>0.000167</ixx>
-          <iyy>0.000167</iyy>
-          <izz>0.000167</izz>
+          <ixx>0.0000817</ixx>
+          <iyy>0.0000817</iyy>
+          <izz>0.0000817</izz>
         </inertia>
       </inertial>
 
@@ -19,7 +19,7 @@
       <collision name="cube_collision">
         <geometry>
           <box>
-            <size>0.1 0.1 0.1</size>
+            <size>0.07 0.07 0.07</size>
           </box>
         </geometry>
       </collision>
@@ -28,7 +28,7 @@
       <visual name="cube_visual">
         <geometry>
           <box>
-            <size>0.1 0.1 0.1</size>
+            <size>0.07 0.07 0.07</size>
           </box>
         </geometry>
 
