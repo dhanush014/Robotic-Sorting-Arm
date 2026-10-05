@@ -11,7 +11,7 @@ find_package(ament_cmake REQUIRED)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
-install(DIRECTORY launch urdf meshes worlds config
+install(DIRECTORY launch urdf meshes worlds config src
   DESTINATION share/${PROJECT_NAME}
 )
 
