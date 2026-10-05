@@ -146,6 +146,36 @@ void add_bins(
   RCLCPP_INFO(logger, "Added %zu bins to MoveIt planning scene", bins.size());
 }
 
+void add_pedestal(
+  moveit::planning_interface::PlanningSceneInterface &psi,
+  const rclcpp::Logger &logger)
+{
+  // robot_pedestal in sorting_world.sdf: 0.3 x 0.3 x 0.775 box centred at (0, -0.75, 0.3875).
+  // It is solid in Gazebo but not part of the URDF. The top is lowered 5 mm so the base_link
+  // resting on it does not put the start state in collision.
+  constexpr double kHeight = 0.775 - 0.005;
+  moveit_msgs::msg::CollisionObject pedestal;
+  pedestal.header.frame_id = "world";
+  pedestal.id = "robot_pedestal";
+
+  shape_msgs::msg::SolidPrimitive primitive;
+  primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
+  primitive.dimensions = {0.3, 0.3, kHeight};
+
+  geometry_msgs::msg::Pose pose;
+  pose.orientation.w = 1.0;
+  pose.position.x = 0.0;
+  pose.position.y = -0.75;
+  pose.position.z = kHeight / 2.0;
+
+  pedestal.primitives.push_back(primitive);
+  pedestal.primitive_poses.push_back(pose);
+  pedestal.operation = moveit_msgs::msg::CollisionObject::ADD;
+  psi.applyCollisionObject(pedestal);
+
+  RCLCPP_INFO(logger, "Added robot pedestal to MoveIt planning scene");
+}
+
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
@@ -188,6 +218,8 @@ int main(int argc, char **argv)
   add_obstacles_from_sdf(planning_scene_interface, node->get_logger());
 
   add_bins(planning_scene_interface, node->get_logger());
+
+  add_pedestal(planning_scene_interface, node->get_logger());
 
   // Give MoveIt/RViz time to receive all objects.
   std::this_thread::sleep_for(std::chrono::seconds(2));
