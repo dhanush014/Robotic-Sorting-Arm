@@ -217,6 +217,7 @@ def generate_launch_description():
         executable="state_machine",
         output="screen",
         parameters=[use_sim_time],
+        condition=IfCondition(LaunchConfiguration("run_state_machine")),
     )
 
     # The planner prints PLANNER_READY_MSG once its MoveGroupInterface is connected to
@@ -233,6 +234,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "gazebo_gui", default_value="true",
             description="Start the Gazebo GUI; false runs the server only (gz sim -s).",
+        ),
+        DeclareLaunchArgument(
+            "run_state_machine", default_value="true",
+            description="Start the state machine last; false brings up everything else for testing.",
         ),
         DeclareLaunchArgument(
             "headless_rendering", default_value="false",
