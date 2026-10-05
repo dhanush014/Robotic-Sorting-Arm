@@ -57,9 +57,11 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# rosidl already registers a Python package named ${PROJECT_NAME}, so
+# ament_python_install_package() would collide; install the client next to it.
 install(
   DIRECTORY sorting_arm_motion_planner
-  DESTINATION lib/python3.12/site-packages
+  DESTINATION ${PYTHON_INSTALL_DIR}
 )
 
 ament_package()

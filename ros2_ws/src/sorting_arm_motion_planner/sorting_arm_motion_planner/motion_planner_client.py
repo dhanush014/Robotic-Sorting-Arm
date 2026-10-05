@@ -1,53 +1,55 @@
-import rclpy
+import threading
+
 from geometry_msgs.msg import Pose
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.node import Node
 from sorting_arm_motion_planner.srv import MoveToTarget
 
-_client = None
-_node = None
 
-
-def _initialize_client():
-  global _client, _node
-  if _client is not None:
-    return
-
-  if not rclpy.ok():
-    rclpy.init()
-
-  if _node is None:
-    _node = rclpy.create_node('motion_planner_client')
-
-  _client = _node.create_client(MoveToTarget, '/move_to_pose')
-
-  if not _client.wait_for_service(timeout_sec=10.0):
-    raise RuntimeError("Motion planner service /move_to_pose not available")
-
-
-def move_to_pose(pose: Pose) -> bool:
+class MotionPlannerClient:
   """
-  Move the robot to the target pose.
+  Client for the /move_to_pose service, attached to a caller-owned node.
 
-  Args:
-    pose: geometry_msgs.msg.Pose target pose
-
-  Returns:
-    bool: True if movement succeeded, False otherwise
+  The client never calls rclpy.init() or spins anything itself: the owning
+  node must be spun by an executor running in another thread (e.g. a
+  MultiThreadedExecutor), which delivers the service response while
+  move_to_pose() blocks waiting for it.
   """
-  _initialize_client()
 
-  request = MoveToTarget.Request()
-  request.target_pose = pose
+  def __init__(self, node: Node, service_name: str = '/move_to_pose',
+               service_timeout_sec: float = 10.0):
+    self._node = node
+    self._client = node.create_client(
+      MoveToTarget, service_name, callback_group=ReentrantCallbackGroup())
 
-  future = _client.call_async(request)
+    if not self._client.wait_for_service(timeout_sec=service_timeout_sec):
+      raise RuntimeError(f"Motion planner service {service_name} not available")
 
-  while rclpy.ok() and not future.done():
-    rclpy.spin_once(_node, timeout_sec=0.1)
+  def move_to_pose(self, pose: Pose, timeout_sec: float = 120.0) -> bool:
+    """
+    Move the robot to the target pose.
 
-  if not future.done():
-    return False
+    Args:
+      pose: geometry_msgs.msg.Pose target pose for the arm group's tip link
+      timeout_sec: how long to wait for planning + execution to finish
 
-  try:
-    response = future.result()
-    return response.success
-  except Exception:
-    return False
+    Returns:
+      bool: True if movement succeeded, False otherwise
+    """
+    request = MoveToTarget.Request()
+    request.target_pose = pose
+
+    done = threading.Event()
+    future = self._client.call_async(request)
+    future.add_done_callback(lambda _: done.set())
+
+    if not done.wait(timeout_sec):
+      self._node.get_logger().error(f"/move_to_pose did not respond within {timeout_sec}s")
+      future.cancel()
+      return False
+
+    try:
+      return future.result().success
+    except Exception as e:
+      self._node.get_logger().error(f"/move_to_pose call failed: {e}")
+      return False

@@ -2,9 +2,8 @@
 """
 States (published as std_msgs/String on /sorting_arm/state  (`ros2 topic echo /sorting_arm/state`)):
 
-Fill in function at the bottom for moving to poses
-
-Untested without movement function so might be some bugs
+Arm motion goes through the /move_to_pose service (sorting_arm_motion_planner), using a
+client attached to this node so everything shares one rclpy context and one executor.
 """
 
 import math
@@ -23,6 +22,9 @@ from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, Pose
 
 import json
+import threading
+
+from sorting_arm_motion_planner import MotionPlannerClient
 
 GRIPPER_JOINT_NAME = "left_outer_knuckle_joint"
 GRIPPER_TOPIC = "/gripper_controller/commands"
@@ -104,7 +106,8 @@ class PickPlaceNode(Node):
 
         self.detected_objects: Optional[list] = None
         if move_to_pose_fn is None:
-            raise ValueError("State machine node requires a move_to_pose_fn")
+            # Share this node (and the executor spinning it) with the planner client
+            move_to_pose_fn = MotionPlannerClient(self).move_to_pose
         self.move_to_pose_fn: Callable[[Pose], bool] = move_to_pose_fn
 
     def _set_state(self, state: str):
@@ -216,23 +219,28 @@ class PickPlaceNode(Node):
         self._set_state("DONE")
 
 
-def main(move_to_pose_fn: [Callable[[Pose], bool]] = None):
-    rclpy.init()
-    node = PickPlaceNode(move_to_pose_fn=move_to_pose_fn)
+def main(args=None):
+    rclpy.init(args=args)
+    node = PickPlaceNode()
 
+    # The executor runs in the background so subscriptions and the planner client's service
+    # responses are processed while run() blocks on each step.
     executor = MultiThreadedExecutor()
     executor.add_node(node)
-    import threading
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
     try:
         node.run()
+    except KeyboardInterrupt:
+        pass
     finally:
-        rclpy.shutdown()
+        executor.shutdown()
+        spin_thread.join(timeout=2.0)
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
-    main(move_to_pose_fn="""DHANUSH FUNCTION HERE I THINK""") #needs to use a geometry_msgs.msg.Pose (can change if you want)
-    
-
+    main()
