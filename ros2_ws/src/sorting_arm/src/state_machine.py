@@ -30,7 +30,7 @@ GRIPPER_JOINT_NAME = "left_outer_knuckle_joint"
 GRIPPER_TOPIC = "/gripper_controller/commands"
 GRIPPER_OPEN = 0.0
 GRIPPER_CLOSE = 0.75 #0.93 = fully closed, will probably change based on testing
-GRIPPER_WAIT_TIMEOUT = 5.0
+GRIPPER_WAIT_TIMEOUT = 10.0
 GRIPPER_TOLERANCE = 0.03            # rad
 # Closing on an object stops the fingers short of the commanded position, so a close also
 # succeeds once the finger joint has moved and then stalled.
@@ -42,7 +42,9 @@ GRIPPER_MIN_TRAVEL = 0.05           # rad the joint must move before a stall cou
 # not geared together and the distal finger joints keep rotating after the knuckles touch the
 # object, tilting the pads until the object squeezes out. The close is therefore ramped per side:
 # all joints of a side move together (pads stay parallel), a side freezes where its outer knuckle
-# meets the object, and once both sides touch they squeeze by GRIPPER_SQUEEZE.
+# meets the object, and once both sides touch they squeeze by GRIPPER_SQUEEZE. The ramp runs on
+# wall-clock time but the joints move in sim time, so a side only advances while it keeps up, and
+# contact means lagging *and* stationary for GRIPPER_STALL_WINDOW (a slow sim only means lagging).
 GRIPPER_JOINTS = [
     "left_outer_knuckle_joint", "right_outer_knuckle_joint",
     "left_inner_knuckle_joint", "right_inner_knuckle_joint",
@@ -50,7 +52,7 @@ GRIPPER_JOINTS = [
 ]
 GRIPPER_RAMP_STEP = 0.015           # rad per GRIPPER_RAMP_PERIOD
 GRIPPER_RAMP_PERIOD = 0.05          # s
-GRIPPER_CONTACT_LAG = 0.06          # rad the outer knuckle lags its command when it is blocked
+GRIPPER_CONTACT_LAG = 0.03          # rad a side may lag its command before the ramp waits for it
 GRIPPER_SQUEEZE = 0.04              # rad past the contact point to hold once both sides touch
 GRIPPER_SETTLE = 0.5                # s to let the squeeze build before lifting
 
@@ -221,16 +223,23 @@ class PickPlaceNode(Node):
 
         command = list(actual)
         in_contact = [False, False]
+        history: List[Tuple[float, List[float]]] = []  # (time, outer positions)
         while time.time() - start < GRIPPER_WAIT_TIMEOUT:
             for side in (0, 1):
-                if not in_contact[side]:
+                if not in_contact[side] and command[side] - actual[side] < GRIPPER_CONTACT_LAG:
                     command[side] = min(target, command[side] + GRIPPER_RAMP_STEP)
             self._publish_gripper(*command)
             time.sleep(GRIPPER_RAMP_PERIOD)
 
             actual = self._joint_positions(outer) or actual
+            now = time.time()
+            history.append((now, list(actual)))
+            history = [(t, a) for t, a in history if now - t <= GRIPPER_STALL_WINDOW]
+            window_full = now - start >= GRIPPER_STALL_WINDOW and len(history) > 1
             for side in (0, 1):
-                if not in_contact[side] and command[side] - actual[side] > GRIPPER_CONTACT_LAG:
+                moved = max(a[side] for _, a in history) - min(a[side] for _, a in history)
+                lagging = command[side] - actual[side] > GRIPPER_CONTACT_LAG / 2
+                if not in_contact[side] and window_full and lagging and moved < GRIPPER_STALL_EPS:
                     # Blocked by the object: hold this side where it touches.
                     in_contact[side] = True
                     command[side] = actual[side]
