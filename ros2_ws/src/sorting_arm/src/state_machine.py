@@ -20,6 +20,9 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import String, Float64MultiArray
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, Pose
+from moveit_msgs.msg import CollisionObject, PlanningScene
+from moveit_msgs.srv import ApplyPlanningScene
+from shape_msgs.msg import SolidPrimitive
 
 import json
 import threading
@@ -57,6 +60,13 @@ GRIPPER_SQUEEZE = 0.04              # rad past the contact point to hold once bo
 GRIPPER_SETTLE = 0.5                # s to let the squeeze build before lifting
 
 APPROACH_STANDOFF = 0.10
+
+# Objects still waiting to be picked are keep-out cylinders in the MoveIt planning scene, so paths
+# to other objects and bins do not sweep through them; each is removed just before its own pick.
+# Sized to cover both the 0.07 m cube (half-diagonal ~0.05) and the 0.1 m tall cylinder.
+TABLE_TOP_Z = 0.775
+OBJECT_KEEPOUT_RADIUS = 0.05
+OBJECT_KEEPOUT_HEIGHT = 0.11
 
 DETECTIONS_TOPIC = "/detected_objects"
 DETECTIONS_WAIT_TIMEOUT = 15.0 
@@ -165,6 +175,9 @@ class PickPlaceNode(Node):
         )
 
         self.detected_objects: Optional[list] = None
+        self.scene_client = self.create_client(
+            ApplyPlanningScene, "/apply_planning_scene", callback_group=cb_group
+        )
         if move_to_pose_fn is None:
             # Share this node (and the executor spinning it) with the planner client
             move_to_pose_fn = MotionPlannerClient(self).move_to_pose
@@ -292,6 +305,39 @@ class PickPlaceNode(Node):
         return False
 
 
+    def _apply_object_keepouts(self, tasks: List["ObjectTask"], add: bool) -> bool:
+        """Add or remove the planning-scene keep-out cylinders for these objects."""
+        scene = PlanningScene(is_diff=True)
+        for task in tasks:
+            obj = CollisionObject()
+            obj.header.frame_id = "world"
+            obj.id = f"pick_target_{task.object_id}"
+            if add:
+                primitive = SolidPrimitive(type=SolidPrimitive.CYLINDER)
+                primitive.dimensions = [OBJECT_KEEPOUT_HEIGHT, OBJECT_KEEPOUT_RADIUS]
+                pose = Pose()
+                pose.position.x = task.pick_pose.position.x
+                pose.position.y = task.pick_pose.position.y
+                pose.position.z = TABLE_TOP_Z + OBJECT_KEEPOUT_HEIGHT / 2
+                pose.orientation.w = 1.0
+                obj.primitives.append(primitive)
+                obj.primitive_poses.append(pose)
+                obj.operation = CollisionObject.ADD
+            else:
+                obj.operation = CollisionObject.REMOVE
+            scene.world.collision_objects.append(obj)
+
+        if not self.scene_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error("/apply_planning_scene not available")
+            return False
+        done = threading.Event()
+        future = self.scene_client.call_async(ApplyPlanningScene.Request(scene=scene))
+        future.add_done_callback(lambda _: done.set())
+        if not done.wait(10.0) or future.result() is None or not future.result().success:
+            self.get_logger().error("Failed to update object keep-outs in the planning scene")
+            return False
+        return True
+
     def run_task(self, task: ObjectTask) -> bool:
 
         approach_pick = offset_pose_z(task.pick_pose, APPROACH_STANDOFF)
@@ -352,8 +398,15 @@ class PickPlaceNode(Node):
             ),
         ]
 
+        if not self._apply_object_keepouts(OBJECTS, add=True):
+            self._set_state("ERROR:PLANNING_SCENE")
+            return
+
         for task in OBJECTS:
             self.get_logger().info(f"--- Starting {task.object_id} ---")
+            if not self._apply_object_keepouts([task], add=False):
+                self._set_state(f"ERROR:PLANNING_SCENE:{task.object_id}")
+                return
             if not self.run_task(task):
                 self.get_logger().error(f"Aborting after failure on {task.object_id}")
                 return
