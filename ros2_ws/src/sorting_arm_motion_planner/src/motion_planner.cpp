@@ -117,6 +117,10 @@ int main(int argc, char *argv[])
   auto move_group =
     moveit::planning_interface::MoveGroupInterface(node, "arm");
 
+  // Overrides default_*_scaling_factor from joint_limits.yaml for every request.
+  move_group.setMaxVelocityScalingFactor(0.5);
+  move_group.setMaxAccelerationScalingFactor(0.5);
+
   RCLCPP_INFO(
     node->get_logger(),
     "Planning frame: %s",

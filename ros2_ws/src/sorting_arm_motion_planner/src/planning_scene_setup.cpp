@@ -3,6 +3,8 @@
 #include <memory>
 #include <sstream>
 #include <thread>
+#include <tuple>
+#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -95,6 +97,55 @@ void add_obstacles_from_sdf(
   file.close();
 }
 
+void add_bins(
+  moveit::planning_interface::PlanningSceneInterface &psi,
+  const rclcpp::Logger &logger)
+{
+  // Bin poses from sorting_arm_gazebo/worlds/sorting_world.sdf and box geometry from
+  // models/{red,blue}_bin/model.sdf (both bins are identical): a 0.35 x 0.35 x 0.05 bottom
+  // and four 0.25 m tall, 0.02 m thick walls, all relative to the bin origin on the ground.
+  struct Box { double x, y, z, sx, sy, sz; };
+  const std::vector<Box> parts = {
+    {0.0, 0.0, 0.025, 0.35, 0.35, 0.05},     // bottom
+    {0.0, 0.165, 0.125, 0.35, 0.02, 0.25},   // left wall
+    {0.0, -0.165, 0.125, 0.35, 0.02, 0.25},  // right wall
+    {0.165, 0.0, 0.125, 0.02, 0.35, 0.25},   // front wall
+    {-0.165, 0.0, 0.125, 0.02, 0.35, 0.25},  // back wall
+  };
+  const std::vector<std::tuple<std::string, double, double>> bins = {
+    {"red_bin", -0.5, -0.8},
+    {"blue_bin", 0.5, -0.8},
+  };
+
+  for (const auto &[id, bx, by] : bins) {
+    moveit_msgs::msg::CollisionObject bin;
+    bin.header.frame_id = "world";
+    bin.id = id;
+    bin.pose.orientation.w = 1.0;
+    bin.pose.position.x = bx;
+    bin.pose.position.y = by;
+
+    for (const auto &part : parts) {
+      shape_msgs::msg::SolidPrimitive primitive;
+      primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
+      primitive.dimensions = {part.sx, part.sy, part.sz};
+
+      geometry_msgs::msg::Pose pose;
+      pose.orientation.w = 1.0;
+      pose.position.x = part.x;
+      pose.position.y = part.y;
+      pose.position.z = part.z;
+
+      bin.primitives.push_back(primitive);
+      bin.primitive_poses.push_back(pose);
+    }
+    bin.operation = moveit_msgs::msg::CollisionObject::ADD;
+    psi.applyCollisionObject(bin);
+  }
+
+  RCLCPP_INFO(logger, "Added %zu bins to MoveIt planning scene", bins.size());
+}
+
 int main(int argc, char **argv)
 {
   rclcpp::init(argc, argv);
@@ -135,6 +186,8 @@ int main(int argc, char **argv)
 
   RCLCPP_INFO(node->get_logger(), "Loading obstacles from Gazebo world...");
   add_obstacles_from_sdf(planning_scene_interface, node->get_logger());
+
+  add_bins(planning_scene_interface, node->get_logger());
 
   // Give MoveIt/RViz time to receive all objects.
   std::this_thread::sleep_for(std::chrono::seconds(2));
