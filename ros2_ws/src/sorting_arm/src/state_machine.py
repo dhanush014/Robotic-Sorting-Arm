@@ -37,6 +37,22 @@ GRIPPER_TOLERANCE = 0.03            # rad
 GRIPPER_STALL_WINDOW = 0.3          # s the joint must stay still to count as stalled
 GRIPPER_STALL_EPS = 0.002           # rad of motion allowed within the stall window
 GRIPPER_MIN_TRAVEL = 0.05           # rad the joint must move before a stall counts
+# gripper_controller joint order (sorting_arm/config/ur_controllers.yaml). In simulation the AG-95
+# linkage is not modelled: every joint is position-controlled on its own, so the two fingers are
+# not geared together and the distal finger joints keep rotating after the knuckles touch the
+# object, tilting the pads until the object squeezes out. The close is therefore ramped per side:
+# all joints of a side move together (pads stay parallel), a side freezes where its outer knuckle
+# meets the object, and once both sides touch they squeeze by GRIPPER_SQUEEZE.
+GRIPPER_JOINTS = [
+    "left_outer_knuckle_joint", "right_outer_knuckle_joint",
+    "left_inner_knuckle_joint", "right_inner_knuckle_joint",
+    "left_finger_joint", "right_finger_joint",
+]
+GRIPPER_RAMP_STEP = 0.015           # rad per GRIPPER_RAMP_PERIOD
+GRIPPER_RAMP_PERIOD = 0.05          # s
+GRIPPER_CONTACT_LAG = 0.06          # rad the outer knuckle lags its command when it is blocked
+GRIPPER_SQUEEZE = 0.04              # rad past the contact point to hold once both sides touch
+GRIPPER_SETTLE = 0.5                # s to let the squeeze build before lifting
 
 APPROACH_STANDOFF = 0.10
 
@@ -174,11 +190,63 @@ class PickPlaceNode(Node):
 
     # for gripper control:
     def _command_gripper(self, position: float, accept_stall: bool = False) -> bool:
-        msg = Float64MultiArray()
-        msg.data = [position, position, position, position, position, position]
+        if accept_stall:
+            return self._close_gripper(position)
         start_position = self._gripper_position()
-        self.gripper_pub.publish(msg)
+        self._publish_gripper(position, position)
         return self._wait_for_gripper(position, start_position, accept_stall)
+
+    def _publish_gripper(self, left: float, right: float):
+        msg = Float64MultiArray()
+        msg.data = [left if name.startswith("left") else right for name in GRIPPER_JOINTS]
+        self.gripper_pub.publish(msg)
+
+    def _joint_positions(self, names: List[str]) -> Optional[List[float]]:
+        js = self.last_joint_state
+        if js is None or any(n not in js.name for n in names):
+            return None
+        return [js.position[js.name.index(n)] for n in names]
+
+    def _close_gripper(self, target: float) -> bool:
+        """Ramp both sides closed, freezing each side at contact, then squeeze (see GRIPPER_JOINTS)."""
+        outer = ["left_outer_knuckle_joint", "right_outer_knuckle_joint"]
+        start = time.time()
+        actual = None
+        while actual is None and time.time() - start < GRIPPER_WAIT_TIMEOUT:
+            actual = self._joint_positions(outer)
+            time.sleep(0.01)
+        if actual is None:
+            self.get_logger().error("No gripper joint states")
+            return False
+
+        command = list(actual)
+        in_contact = [False, False]
+        while time.time() - start < GRIPPER_WAIT_TIMEOUT:
+            for side in (0, 1):
+                if not in_contact[side]:
+                    command[side] = min(target, command[side] + GRIPPER_RAMP_STEP)
+            self._publish_gripper(*command)
+            time.sleep(GRIPPER_RAMP_PERIOD)
+
+            actual = self._joint_positions(outer) or actual
+            for side in (0, 1):
+                if not in_contact[side] and command[side] - actual[side] > GRIPPER_CONTACT_LAG:
+                    # Blocked by the object: hold this side where it touches.
+                    in_contact[side] = True
+                    command[side] = actual[side]
+            if all(in_contact):
+                squeeze = [a + GRIPPER_SQUEEZE for a in actual]
+                self._publish_gripper(*squeeze)
+                time.sleep(GRIPPER_SETTLE)
+                self.get_logger().info(
+                    f"Gripper contact at left={actual[0]:.3f} right={actual[1]:.3f} rad; treating as grasped"
+                )
+                return True
+            if all(c >= target for c in command) and all(abs(a - target) < GRIPPER_TOLERANCE for a in actual):
+                self.get_logger().warn("Gripper closed fully without touching an object")
+                return True
+        self.get_logger().warn("Timed out closing the gripper")
+        return False
 
     def _gripper_position(self) -> Optional[float]:
         js = self.last_joint_state
