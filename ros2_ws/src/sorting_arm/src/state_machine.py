@@ -80,7 +80,16 @@ class ObjectTask:
 
 
 
-COLOR_DROP_POINTS = {"red": make_pose(0.45, -0.20, 0.4),"blue": make_pose(0.15, -0.20, 0.4),}
+# Bin centres from sorting_arm_gazebo/worlds/sorting_world.sdf (world frame). The bins sit on
+# the ground with 0.25 m walls, so release well above the rim; PLACE_APPROACH adds
+# APPROACH_STANDOFF on top of this.
+BIN_RIM_HEIGHT = 0.25
+RELEASE_CLEARANCE = 0.15
+RELEASE_HEIGHT = BIN_RIM_HEIGHT + RELEASE_CLEARANCE
+COLOR_DROP_POINTS = {
+    "red": make_pose(-0.5, -0.8, RELEASE_HEIGHT),
+    "blue": make_pose(0.5, -0.8, RELEASE_HEIGHT),
+}
 OBJ1_POSE = make_pose(-0.45, 0.20, 0.85)
 OBJ2_POSE = make_pose(-0.15, 0.20, 0.85)
 OBJ3_POSE = make_pose(0.15, 0.20, 0.85)
