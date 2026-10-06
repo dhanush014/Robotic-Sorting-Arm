@@ -1,0 +1,11 @@
+I shrank the objects from 100 to 70 mm, since the gripper only opens to 95 and couldn't grab them. @Krish
+The state machine is connected to the motion planner now. I fixed the bin coordinates, and I fixed a missing </xacro:macro> in your friction edit that was breaking the robot file. @Manu
+I added the bins and pedestal to the planner so it avoids them, and made one launch file that starts everything.
+
+git checkout main && git pull
+cd ros2_ws
+colcon build --symlink-install --packages-skip dh_gripper_driver --allow-overriding ur_description
+source install/setup.bash
+ros2 launch sorting_arm_moveit_config sim_state_machine.launch.py
+
+You'll see the camera label each object, then the arm picks them up one by one and drops each in its matching bin. It's slow, so wait until the terminal says DONE
