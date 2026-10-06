@@ -11,8 +11,13 @@ find_package(ament_cmake REQUIRED)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
-install(DIRECTORY launch urdf meshes worlds config src
+install(DIRECTORY launch urdf meshes worlds config
   DESTINATION share/${PROJECT_NAME}
+)
+
+install(PROGRAMS src/state_machine.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME state_machine
 )
 
 if(BUILD_TESTING)

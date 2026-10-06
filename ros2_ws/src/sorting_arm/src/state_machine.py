@@ -2,18 +2,18 @@
 """
 States (published as std_msgs/String on /sorting_arm/state  (`ros2 topic echo /sorting_arm/state`)):
 
-Fill in function at the bottom for moving to poses
-
-Untested without movement function so might be some bugs
+Arm motion goes through the /move_to_pose service (sorting_arm_motion_planner), using a
+client attached to this node so everything shares one rclpy context and one executor.
 """
 
 import math
-import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
+from rclpy.time import Time
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.qos import QoSProfile, DurabilityPolicy
@@ -21,17 +21,65 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import String, Float64MultiArray
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, Pose
+from moveit_msgs.msg import AttachedCollisionObject, CollisionObject, PlanningScene
+from moveit_msgs.srv import ApplyPlanningScene
+from shape_msgs.msg import SolidPrimitive
 
 import json
+import threading
+
+from sorting_arm_motion_planner import MotionPlannerClient
 
 GRIPPER_JOINT_NAME = "left_outer_knuckle_joint"
 GRIPPER_TOPIC = "/gripper_controller/commands"
 GRIPPER_OPEN = 0.0
 GRIPPER_CLOSE = 0.75 #0.93 = fully closed, will probably change based on testing
-GRIPPER_WAIT_TIMEOUT = 5.0
+GRIPPER_WAIT_TIMEOUT = 10.0
 GRIPPER_TOLERANCE = 0.03            # rad
+# Closing on an object stops the fingers short of the commanded position, so a close also
+# succeeds once the finger joint has moved and then stalled.
+GRIPPER_STALL_WINDOW = 0.3          # s the joint must stay still to count as stalled
+GRIPPER_STALL_EPS = 0.002           # rad of motion allowed within the stall window
+GRIPPER_MIN_TRAVEL = 0.05           # rad the joint must move before a stall counts
+# gripper_controller joint order (sorting_arm/config/ur_controllers.yaml). In simulation the AG-95
+# linkage is not modelled: every joint is position-controlled on its own, so the two fingers are
+# not geared together and the distal finger joints keep rotating after the knuckles touch the
+# object, tilting the pads until the object squeezes out. The close is therefore ramped per side:
+# all joints of a side move together (pads stay parallel), a side freezes where its outer knuckle
+# meets the object, and once both sides touch they squeeze by GRIPPER_SQUEEZE. A side only
+# advances while it keeps up with its command, and contact means lagging *and* stationary for
+# GRIPPER_STALL_WINDOW.
+# All waits and timeouts in this node run on the node clock, i.e. sim time under use_sim_time, so
+# they mean the same thing however fast Gazebo runs (the GUI can drop the real-time factor to ~13%).
+GRIPPER_JOINTS = [
+    "left_outer_knuckle_joint", "right_outer_knuckle_joint",
+    "left_inner_knuckle_joint", "right_inner_knuckle_joint",
+    "left_finger_joint", "right_finger_joint",
+]
+GRIPPER_RAMP_STEP = 0.015           # rad per GRIPPER_RAMP_PERIOD
+GRIPPER_RAMP_PERIOD = 0.05          # s
+GRIPPER_CONTACT_LAG = 0.03          # rad a side may lag its command before the ramp waits for it
+GRIPPER_SQUEEZE = 0.04              # rad past the contact point to hold once both sides touch
+GRIPPER_SETTLE = 0.5                # s to let the squeeze build before lifting
 
 APPROACH_STANDOFF = 0.10
+
+# Objects still waiting to be picked are keep-out cylinders in the MoveIt planning scene, so paths
+# to other objects and bins do not sweep through them; each is removed just before its own pick.
+# Sized to cover both the 0.07 m cube (half-diagonal ~0.05) and the 0.1 m tall cylinder.
+TABLE_TOP_Z = 0.775
+OBJECT_KEEPOUT_RADIUS = 0.05
+OBJECT_KEEPOUT_HEIGHT = 0.11
+# Once grasped, the object is attached to grasp_link so planning accounts for it hanging below the
+# fingertips (otherwise carried objects drag across the table edge). Same footprint, starting just
+# above the table so the attached shape is not in collision with it at attach time.
+ATTACHED_OBJECT_HEIGHT = 0.10
+ATTACH_LINK = "grasp_link"
+GRIPPER_TOUCH_LINKS = [
+    "grasp_link", "ag95_base_link", "ag95_body",
+    "left_outer_knuckle", "left_inner_knuckle", "left_finger", "left_finger_pad",
+    "right_outer_knuckle", "right_inner_knuckle", "right_finger", "right_finger_pad",
+]
 
 DETECTIONS_TOPIC = "/detected_objects"
 DETECTIONS_WAIT_TIMEOUT = 15.0 
@@ -53,11 +101,35 @@ def quaternion_from_euler(roll: float, pitch: float, yaw: float) -> Tuple[float,
     )
 
 
+def quaternion_multiply(
+    a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]
+) -> Tuple[float, float, float, float]:
+    """Hamilton product a * b of (x, y, z, w) quaternions."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+# The MoveIt arm group tip is grasp_link, which is fixed to ag95_base_link with
+# rpy=(pi/2, -pi/2, 0) (grasp_joint in dh_ag95_macro_for_sorting_arm.xacro).
+GRASP_LINK_OFFSET_Q = quaternion_from_euler(math.pi / 2, -math.pi / 2, 0.0)
+
+
 def make_pose(x: float, y: float, z: float, roll: float = 0.0, pitch: float = math.pi, yaw: float = 0.0) -> Pose:
-    """Default orientation (roll=0, pitch=pi) points straight down, rotate z to change gripper angle."""
+    """Pose target for grasp_link.
+
+    roll/pitch/yaw give the orientation of the gripper base (ag95_base_link, whose +z is the
+    finger direction), so the default (roll=0, pitch=pi) points the fingers straight down;
+    rotate yaw to change the gripper angle. The fixed grasp_link offset is applied on top.
+    """
     p = Pose()
     p.position.x, p.position.y, p.position.z = x, y, z
-    qx, qy, qz, qw = quaternion_from_euler(roll, pitch, yaw)
+    qx, qy, qz, qw = quaternion_multiply(quaternion_from_euler(roll, pitch, yaw), GRASP_LINK_OFFSET_Q)
     p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w = qx, qy, qz, qw
     return p
 
@@ -78,11 +150,24 @@ class ObjectTask:
 
 
 
-COLOR_DROP_POINTS = {"red": make_pose(0.45, -0.20, 0.4),"blue": make_pose(0.15, -0.20, 0.4),}
-OBJ1_POSE = make_pose(-0.45, 0.20, 0.85)
-OBJ2_POSE = make_pose(-0.15, 0.20, 0.85)
-OBJ3_POSE = make_pose(0.15, 0.20, 0.85)
-OBJ4_POSE = make_pose(0.45, 0.20, 0.85)
+# Bin centres from sorting_arm_gazebo/worlds/sorting_world.sdf (world frame). The bins sit on
+# the ground with 0.25 m walls, so release well above the rim; PLACE_APPROACH adds
+# APPROACH_STANDOFF on top of this.
+BIN_RIM_HEIGHT = 0.25
+RELEASE_CLEARANCE = 0.15
+RELEASE_HEIGHT = BIN_RIM_HEIGHT + RELEASE_CLEARANCE
+COLOR_DROP_POINTS = {
+    "red": make_pose(-0.5, -0.8, RELEASE_HEIGHT),
+    "blue": make_pose(0.5, -0.8, RELEASE_HEIGHT),
+}
+# grasp_link height for picking. The table top is at 0.775 and objects are 0.07 m wide (cubes
+# 0.07 m tall, centre 0.81; cylinders 0.1 m tall, centre 0.825). The AG-95 pads span ~0.01-0.04 m
+# above grasp_link, so 0.815 grips both shapes with the fingertips ~3 cm clear of the table.
+PICK_HEIGHT = 0.815
+OBJ1_POSE = make_pose(-0.45, 0.20, PICK_HEIGHT)
+OBJ2_POSE = make_pose(-0.15, 0.20, PICK_HEIGHT)
+OBJ3_POSE = make_pose(0.15, 0.20, PICK_HEIGHT)
+OBJ4_POSE = make_pose(0.45, 0.20, PICK_HEIGHT)
 
 
 class PickPlaceNode(Node):
@@ -103,14 +188,40 @@ class PickPlaceNode(Node):
         )
 
         self.detected_objects: Optional[list] = None
+        self.scene_client = self.create_client(
+            ApplyPlanningScene, "/apply_planning_scene", callback_group=cb_group
+        )
         if move_to_pose_fn is None:
-            raise ValueError("State machine node requires a move_to_pose_fn")
+            # Share this node (and the executor spinning it) with the planner client
+            move_to_pose_fn = MotionPlannerClient(self).move_to_pose
         self.move_to_pose_fn: Callable[[Pose], bool] = move_to_pose_fn
 
     def _set_state(self, state: str):
         self.get_logger().info(f"[state] {state}")
         self.state_pub.publish(String(data=state))
  
+    def _now(self) -> float:
+        """Node clock time in seconds (sim time under use_sim_time)."""
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _sleep(self, seconds: float):
+        self.get_clock().sleep_for(Duration(seconds=seconds))
+
+    def _wait_until(self, condition: Callable[[], bool], timeout: float, period: float = 0.05) -> bool:
+        """Poll condition on the node clock until it holds or timeout seconds pass."""
+        deadline = self._now() + timeout
+        while not condition():
+            if self._now() >= deadline:
+                return False
+            self._sleep(period)
+        return True
+
+    def _wait_for_clock(self):
+        """Under use_sim_time the clock reads 0 until the first /clock message; wait for it."""
+        clock = self.get_clock()
+        while rclpy.ok() and clock.now().nanoseconds == 0:
+            clock.sleep_until(Time(nanoseconds=1, clock_type=clock.clock_type))
+
     def _joint_state_cb(self, msg: JointState):
         self.last_joint_state = msg
  
@@ -122,30 +233,169 @@ class PickPlaceNode(Node):
             self.get_logger().error(f"Could not parse {DETECTIONS_TOPIC}: {e}")
  
     def _wait_for_detections(self, timeout: float = DETECTIONS_WAIT_TIMEOUT) -> bool:
-        start = time.time()
-        while self.detected_objects is None and time.time() - start < timeout:
-            time.sleep(0.05)
-        return self.detected_objects is not None
+        return self._wait_until(lambda: self.detected_objects is not None, timeout)
 
     # for gripper control:
-    def _command_gripper(self, position: float) -> bool:
-        msg = Float64MultiArray()
-        msg.data = [position, position, position, position, position, position]
-        self.gripper_pub.publish(msg)
-        return self._wait_for_gripper(position)
+    def _command_gripper(self, position: float, accept_stall: bool = False) -> bool:
+        if accept_stall:
+            return self._close_gripper(position)
+        start_position = self._gripper_position()
+        self._publish_gripper(position, position)
+        return self._wait_for_gripper(position, start_position, accept_stall)
 
-    def _wait_for_gripper(self, target: float) -> bool:
-        start = time.time()
-        while time.time() - start < GRIPPER_WAIT_TIMEOUT:
-            js = self.last_joint_state
-            if js is not None and GRIPPER_JOINT_NAME in js.name:
-                idx = js.name.index(GRIPPER_JOINT_NAME)
-                if abs(js.position[idx] - target) < GRIPPER_TOLERANCE:
-                    return True
-            time.sleep(0.05)
-        self.get_logger().warn("Timed out waiting for gripper to reach target; continuing anyway")
+    def _publish_gripper(self, left: float, right: float):
+        msg = Float64MultiArray()
+        msg.data = [left if name.startswith("left") else right for name in GRIPPER_JOINTS]
+        self.gripper_pub.publish(msg)
+
+    def _joint_positions(self, names: List[str]) -> Optional[List[float]]:
+        js = self.last_joint_state
+        if js is None or any(n not in js.name for n in names):
+            return None
+        return [js.position[js.name.index(n)] for n in names]
+
+    def _close_gripper(self, target: float) -> bool:
+        """Ramp both sides closed, freezing each side at contact, then squeeze (see GRIPPER_JOINTS)."""
+        outer = ["left_outer_knuckle_joint", "right_outer_knuckle_joint"]
+        start = self._now()
+        if not self._wait_until(lambda: self._joint_positions(outer) is not None, GRIPPER_WAIT_TIMEOUT, 0.01):
+            self.get_logger().error("No gripper joint states")
+            return False
+        actual = self._joint_positions(outer)
+
+        command = list(actual)
+        in_contact = [False, False]
+        history: List[Tuple[float, List[float]]] = []  # (time, outer positions)
+        while self._now() - start < GRIPPER_WAIT_TIMEOUT:
+            for side in (0, 1):
+                if not in_contact[side] and command[side] - actual[side] < GRIPPER_CONTACT_LAG:
+                    command[side] = min(target, command[side] + GRIPPER_RAMP_STEP)
+            self._publish_gripper(*command)
+            self._sleep(GRIPPER_RAMP_PERIOD)
+
+            actual = self._joint_positions(outer) or actual
+            now = self._now()
+            history.append((now, list(actual)))
+            history = [(t, a) for t, a in history if now - t <= GRIPPER_STALL_WINDOW]
+            window_full = now - start >= GRIPPER_STALL_WINDOW and len(history) > 1
+            for side in (0, 1):
+                moved = max(a[side] for _, a in history) - min(a[side] for _, a in history)
+                lagging = command[side] - actual[side] > GRIPPER_CONTACT_LAG / 2
+                if not in_contact[side] and window_full and lagging and moved < GRIPPER_STALL_EPS:
+                    # Blocked by the object: hold this side where it touches.
+                    in_contact[side] = True
+                    command[side] = actual[side]
+            if all(in_contact):
+                squeeze = [a + GRIPPER_SQUEEZE for a in actual]
+                self._publish_gripper(*squeeze)
+                self._sleep(GRIPPER_SETTLE)
+                self.get_logger().info(
+                    f"Gripper contact at left={actual[0]:.3f} right={actual[1]:.3f} rad; treating as grasped"
+                )
+                return True
+            if all(c >= target for c in command) and all(abs(a - target) < GRIPPER_TOLERANCE for a in actual):
+                self.get_logger().warn("Gripper closed fully without touching an object")
+                return True
+        self.get_logger().warn("Timed out closing the gripper")
         return False
 
+    def _gripper_position(self) -> Optional[float]:
+        js = self.last_joint_state
+        if js is not None and GRIPPER_JOINT_NAME in js.name:
+            return js.position[js.name.index(GRIPPER_JOINT_NAME)]
+        return None
+
+    def _wait_for_gripper(self, target: float, start_position: Optional[float], accept_stall: bool) -> bool:
+        """Wait until the gripper reaches target or, if accept_stall, stops moving after travelling."""
+        start = self._now()
+        samples: List[Tuple[float, float]] = []  # (time, position)
+        while self._now() - start < GRIPPER_WAIT_TIMEOUT:
+            pos = self._gripper_position()
+            if pos is not None:
+                if abs(pos - target) < GRIPPER_TOLERANCE:
+                    return True
+
+                now = self._now()
+                if start_position is None:
+                    start_position = pos
+                samples.append((now, pos))
+                samples = [(t, p) for t, p in samples if now - t <= GRIPPER_STALL_WINDOW]
+
+                travelled = abs(pos - start_position) >= GRIPPER_MIN_TRAVEL
+                window_full = now - start >= GRIPPER_STALL_WINDOW and len(samples) > 1
+                still = max(p for _, p in samples) - min(p for _, p in samples) < GRIPPER_STALL_EPS
+                if accept_stall and travelled and window_full and still:
+                    self.get_logger().info(
+                        f"Gripper stopped at {pos:.3f} rad (commanded {target:.3f}); treating as grasped"
+                    )
+                    return True
+            self._sleep(0.05)
+        self.get_logger().warn("Timed out waiting for gripper to reach target")
+        return False
+
+
+    @staticmethod
+    def _object_shape(task: "ObjectTask", height: float, bottom_z: float) -> CollisionObject:
+        """Cylinder covering the object at its pick position, in the world frame."""
+        obj = CollisionObject()
+        obj.header.frame_id = "world"
+        obj.id = f"pick_target_{task.object_id}"
+        primitive = SolidPrimitive(type=SolidPrimitive.CYLINDER)
+        primitive.dimensions = [height, OBJECT_KEEPOUT_RADIUS]
+        pose = Pose()
+        pose.position.x = task.pick_pose.position.x
+        pose.position.y = task.pick_pose.position.y
+        pose.position.z = bottom_z + height / 2
+        pose.orientation.w = 1.0
+        obj.primitives.append(primitive)
+        obj.primitive_poses.append(pose)
+        return obj
+
+    def _apply_object_keepouts(self, tasks: List["ObjectTask"], add: bool) -> bool:
+        """Add or remove the planning-scene keep-out cylinders for these objects."""
+        scene = PlanningScene(is_diff=True)
+        for task in tasks:
+            obj = self._object_shape(task, OBJECT_KEEPOUT_HEIGHT, TABLE_TOP_Z)
+            if add:
+                obj.operation = CollisionObject.ADD
+            else:
+                obj = CollisionObject(header=obj.header, id=obj.id, operation=CollisionObject.REMOVE)
+            scene.world.collision_objects.append(obj)
+        return self._apply_scene(scene)
+
+    def _attach_object(self, task: "ObjectTask", attach: bool) -> bool:
+        """Attach the grasped object to grasp_link, or detach and remove it after release."""
+        scene = PlanningScene(is_diff=True)
+        scene.robot_state.is_diff = True
+        aco = AttachedCollisionObject(link_name=ATTACH_LINK)
+        if attach:
+            aco.object = self._object_shape(task, ATTACHED_OBJECT_HEIGHT, TABLE_TOP_Z + 0.005)
+            aco.object.operation = CollisionObject.ADD
+            aco.touch_links = GRIPPER_TOUCH_LINKS
+        else:
+            aco.object = CollisionObject(id=f"pick_target_{task.object_id}", operation=CollisionObject.REMOVE)
+        scene.robot_state.attached_collision_objects.append(aco)
+        if not self._apply_scene(scene):
+            return False
+        if attach:
+            return True
+        # Detaching puts the object back into the world; it is in the bin now, so drop it.
+        world = PlanningScene(is_diff=True)
+        world.world.collision_objects.append(
+            CollisionObject(id=aco.object.id, operation=CollisionObject.REMOVE))
+        return self._apply_scene(world)
+
+    def _apply_scene(self, scene: PlanningScene) -> bool:
+        if not self._wait_until(self.scene_client.service_is_ready, 5.0):
+            self.get_logger().error("/apply_planning_scene not available")
+            return False
+        done = threading.Event()
+        future = self.scene_client.call_async(ApplyPlanningScene.Request(scene=scene))
+        future.add_done_callback(lambda _: done.set())
+        if not self._wait_until(done.is_set, 10.0) or future.result() is None or not future.result().success:
+            self.get_logger().error("Failed to update the planning scene")
+            return False
+        return True
 
     def run_task(self, task: ObjectTask) -> bool:
 
@@ -155,11 +405,13 @@ class PickPlaceNode(Node):
         steps = [
             (f"PICK_APPROACH:{task.object_id}", lambda: self.move_to_pose_fn(approach_pick)),
             (f"PICK_DESCEND:{task.object_id}", lambda: self.move_to_pose_fn(task.pick_pose)),
-            (f"GRIPPER_CLOSE:{task.object_id}", lambda: self._command_gripper(task.gripper_close)),
+            (f"GRIPPER_CLOSE:{task.object_id}", lambda: self._command_gripper(task.gripper_close, accept_stall=True)
+             and self._attach_object(task, attach=True)),
             (f"PICK_RETREAT:{task.object_id}", lambda: self.move_to_pose_fn(approach_pick)),
             (f"PLACE_APPROACH:{task.object_id}", lambda: self.move_to_pose_fn(approach_place)),
             (f"PLACE_DESCEND:{task.object_id}", lambda: self.move_to_pose_fn(task.place_pose)),
-            (f"GRIPPER_OPEN:{task.object_id}", lambda: self._command_gripper(GRIPPER_OPEN)),
+            (f"GRIPPER_OPEN:{task.object_id}", lambda: self._command_gripper(GRIPPER_OPEN)
+             and self._attach_object(task, attach=False)),
             (f"PLACE_RETREAT:{task.object_id}", lambda: self.move_to_pose_fn(approach_place)),
         ]
 
@@ -173,6 +425,7 @@ class PickPlaceNode(Node):
 
     def run(self):
         self._set_state("INIT")
+        self._wait_for_clock()
         if not self._wait_for_detections():
             self.get_logger().error(f"No message on {DETECTIONS_TOPIC} within timeout, aborting")
             self._set_state("ERROR:WAIT_FOR_DETECTIONS")
@@ -207,8 +460,15 @@ class PickPlaceNode(Node):
             ),
         ]
 
+        if not self._apply_object_keepouts(OBJECTS, add=True):
+            self._set_state("ERROR:PLANNING_SCENE")
+            return
+
         for task in OBJECTS:
             self.get_logger().info(f"--- Starting {task.object_id} ---")
+            if not self._apply_object_keepouts([task], add=False):
+                self._set_state(f"ERROR:PLANNING_SCENE:{task.object_id}")
+                return
             if not self.run_task(task):
                 self.get_logger().error(f"Aborting after failure on {task.object_id}")
                 return
@@ -216,23 +476,28 @@ class PickPlaceNode(Node):
         self._set_state("DONE")
 
 
-def main(move_to_pose_fn: [Callable[[Pose], bool]] = None):
-    rclpy.init()
-    node = PickPlaceNode(move_to_pose_fn=move_to_pose_fn)
+def main(args=None):
+    rclpy.init(args=args)
+    node = PickPlaceNode()
 
+    # The executor runs in the background so subscriptions and the planner client's service
+    # responses are processed while run() blocks on each step.
     executor = MultiThreadedExecutor()
     executor.add_node(node)
-    import threading
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
     try:
         node.run()
+    except KeyboardInterrupt:
+        pass
     finally:
-        rclpy.shutdown()
+        executor.shutdown()
+        spin_thread.join(timeout=2.0)
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
-    main(move_to_pose_fn="""DHANUSH FUNCTION HERE I THINK""") #needs to use a geometry_msgs.msg.Pose (can change if you want)
-    
-
+    main()
