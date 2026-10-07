@@ -192,8 +192,8 @@ int main(int argc, char **argv)
   primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
 
   primitive.dimensions = {
-    1.5,    // X
-    0.995,  // Y
+    1.65,    // X 1.5
+    1.05,  // Y 0.995
     0.05    // Z
   };
 

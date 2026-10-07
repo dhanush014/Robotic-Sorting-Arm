@@ -33,9 +33,9 @@ from sorting_arm_motion_planner import MotionPlannerClient
 GRIPPER_JOINT_NAME = "left_outer_knuckle_joint"
 GRIPPER_TOPIC = "/gripper_controller/commands"
 GRIPPER_OPEN = 0.0
-GRIPPER_CLOSE = 0.75 #0.93 = fully closed, will probably change based on testing
+GRIPPER_CLOSE = 0.65 #0.93 = fully closed, will probably change based on testing
 GRIPPER_WAIT_TIMEOUT = 10.0
-GRIPPER_TOLERANCE = 0.03            # rad
+GRIPPER_TOLERANCE = 0.05            # rad
 # Closing on an object stops the fingers short of the commanded position, so a close also
 # succeeds once the finger joint has moved and then stalled.
 GRIPPER_STALL_WINDOW = 0.3          # s the joint must stay still to count as stalled
@@ -59,17 +59,17 @@ GRIPPER_JOINTS = [
 GRIPPER_RAMP_STEP = 0.015           # rad per GRIPPER_RAMP_PERIOD
 GRIPPER_RAMP_PERIOD = 0.05          # s
 GRIPPER_CONTACT_LAG = 0.03          # rad a side may lag its command before the ramp waits for it
-GRIPPER_SQUEEZE = 0.04              # rad past the contact point to hold once both sides touch
-GRIPPER_SETTLE = 0.5                # s to let the squeeze build before lifting
+GRIPPER_SQUEEZE = 0.03              # rad past the contact point to hold once both sides touch
+GRIPPER_SETTLE = 0.2                # s to let the squeeze build before lifting
 
-APPROACH_STANDOFF = 0.10
+APPROACH_STANDOFF = 0.15
 
 # Objects still waiting to be picked are keep-out cylinders in the MoveIt planning scene, so paths
 # to other objects and bins do not sweep through them; each is removed just before its own pick.
 # Sized to cover both the 0.07 m cube (half-diagonal ~0.05) and the 0.1 m tall cylinder.
 TABLE_TOP_Z = 0.775
-OBJECT_KEEPOUT_RADIUS = 0.05
-OBJECT_KEEPOUT_HEIGHT = 0.11
+OBJECT_KEEPOUT_RADIUS = 0.07
+OBJECT_KEEPOUT_HEIGHT = 0.15
 # Once grasped, the object is attached to grasp_link so planning accounts for it hanging below the
 # fingertips (otherwise carried objects drag across the table edge). Same footprint, starting just
 # above the table so the attached shape is not in collision with it at attach time.

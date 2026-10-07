@@ -151,11 +151,11 @@
            would be ignored. finger_pad_joint sets preserveFixedJoint so the pad
            is not lumped into the finger link, which would drop these settings. -->
       <gazebo reference="${prefix}${fingerprefix}_finger_pad">
-        <mu1>150.0</mu1>
-        <mu2>150.0</mu2>
+        <mu1>4500.0</mu1>
+        <mu2>4500.0</mu2>
         <kp>1000000.0</kp>
         <kd>1.0</kd>
-        <minDepth>0.001</minDepth>
+        <minDepth>0.005</minDepth>
       </gazebo>
     </xacro:macro>
 
@@ -341,4 +341,4 @@
 
   </xacro:macro>
 
-</robot>
+</robot>
